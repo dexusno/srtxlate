@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>SRT → Norsk Bokmål</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <style>
+    .progress { height: 10px; background: #333; border-radius: 6px; overflow: hidden; margin-top: 8px; display: none; }
+    .bar { height:100%; width:0%; background:#3b82f6; transition: width .2s; }
+    .row small { opacity: .7; }
+    .actions { display:flex; gap:10px; align-items:center; margin-top:12px; }
+    #dlBtn { display:none; background:#10b981; border:0; color:white; padding:8px 12px; border-radius:10px; font-weight:700; }
+    #dlBtn[disabled] { opacity:.6; cursor:not-allowed; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>SRT Translator</h1>
+    <form id="form" action="/translate" method="post" enctype="multipart/form-data">
+      <div class="row"><label>Source:</label>
+        <select name="source" id="source">
+          <option value="en" selected>English (en)</option>
+          <option value="auto">Auto</option>
+        </select>
+      </div>
+      <div class="row"><label>Target:</label>
+        <select name="target" id="target">
+          <option value="nb" selected>Norwegian Bokmål (nb)</option>
+          <option value="no">Norwegian (no → nb)</option>
+          <option value="nn">Norwegian Nynorsk (nn)</option>
+        </select>
+      </div>
+      <div class="row"><label>Engine:</label>
+        <select name="engine" id="engine">
+          <option value="auto" selected>Auto (CT2 → LT → Argos)</option>
+          <option value="ct2">CTranslate2 (Marian OPUS‑MT)</option>
+          <option value="libre">LibreTranslate API</option>
+          <option value="argos">Argos (local/offline)</option>
+        </select>
+      </div>
+      <div class="row">
+        <label></label>
+        <label><input type="checkbox" id="live"> Show progress (SSE)</label>
+        <small>Streams progress with minimal overhead.</small>
+      </div>
+      <div id="drop" class="dropzone">
+        <p id="hint">Drop .srt here or click to choose</p>
+        <p id="fname" style="opacity:.8"></p>
+        <input id="file" type="file" name="file" accept=".srt" hidden />
+      </div>
+      <div class="progress" id="prog"><div class="bar" id="bar"></div></div>
+      <div class="actions">
+        <button id="submitBtn" type="submit">Translate</button>
+        <button id="dlBtn" type="button" disabled>Download translated file</button>
+      </div>
+    </form>
+  </main>
+
+<script>
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+const hint = document.getElementById('hint');
+const fname = document.getElementById('fname');
+const form = document.getElementById('form');
+const submitBtn = document.getElementById('submitBtn');
+const sourceSel = document.getElementById('source');
+const targetSel = document.getElementById('target');
+const engineSel = document.getElementById('engine');
+const liveChk = document.getElementById('live');
+const prog = document.getElementById('prog');
+const bar = document.getElementById('bar');
+const dlBtn = document.getElementById('dlBtn');
+
+let droppedFile = null;
+let lastBlobUrl = null;
+let lastFilename = null;
+let lastFormData = null;
+
+function resetDownloadState() {
+  if (lastBlobUrl) {
+    URL.revokeObjectURL(lastBlobUrl);
+    lastBlobUrl = null;
+  }
+  lastFilename = null;
+  dlBtn.style.display = 'none';
+  dlBtn.disabled = true;
+}
+
+function setChosen(name) {
+  fname.textContent = name;
+  hint.textContent = 'Ready. Click “Translate”.';
+  resetDownloadState();
+}
+
+drop.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', () => {
+  droppedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+  if (droppedFile) setChosen(droppedFile.name);
+});
+
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', e => { e.preventDefault(); drop.classList.remove('over'); });
+drop.addEventListener('drop', e => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f && f.name.toLowerCase().endsWith('.srt')) {
+    droppedFile = f;
+    setChosen(f.name);
+  } else {
+    hint.textContent = 'Please drop a .srt file';
+  }
+});
+
+function cacheAndShowDownload(blob, filename) {
+  if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
+  lastBlobUrl = URL.createObjectURL(blob);
+  lastFilename = filename;
+  dlBtn.style.display = 'inline-block';
+  dlBtn.disabled = false;
+}
+
+dlBtn.addEventListener('click', () => {
+  if (!lastBlobUrl || !lastFilename) return;
+  const a = document.createElement('a');
+  a.href = lastBlobUrl;
+  a.download = lastFilename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!droppedFile) { hint.textContent = 'Select or drop a .srt file first'; return; }
+
+  submitBtn.disabled = true; submitBtn.textContent = 'Translating…';
+  dlBtn.disabled = true;
+
+  const fd = new FormData();
+  fd.append('file', droppedFile, droppedFile.name);
+  fd.append('source', sourceSel.value);
+  fd.append('target', targetSel.value);
+  fd.append('engine', engineSel.value);
+  lastFormData = fd; // for optional re-fetch if needed
+
+  if (!liveChk.checked) {
+    const res = await fetch('/translate', { method: 'POST', body: fd });
+    if (!res.ok) { hint.textContent = 'Server error: ' + res.status; submitBtn.disabled=false; submitBtn.textContent='Translate'; return; }
+    const blob = await res.blob();
+    const dlName = (droppedFile.name.replace(/\.srt$/i, '') || 'subtitle') + '.' + targetSel.value + '.srt';
+    cacheAndShowDownload(blob, dlName);
+    hint.textContent = 'Finished. Click “Download translated file”.';
+    submitBtn.disabled = false; submitBtn.textContent = 'Translate';
+    return;
+  }
+
+  // Streaming progress (SSE)
+  prog.style.display = 'block'; bar.style.width = '0%';
+  const resp = await fetch('/translate_sse', { method: 'POST', body: fd });
+  if (!resp.ok) { hint.textContent = 'Server error: ' + resp.status; submitBtn.disabled=false; submitBtn.textContent='Translate'; prog.style.display='none'; return; }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+
+  while (true) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, {stream: true});
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const chunk = buf.slice(0, idx); buf = buf.slice(idx+2);
+      if (chunk.startsWith('data:')) {
+        const data = JSON.parse(chunk.slice(5).trim());
+        if (data.progress !== undefined) bar.style.width = (data.progress + '%');
+        if (data.done) {
+          // Fetch final file once; do not auto-download, just enable the button.
+          const res2 = await fetch('/translate', { method: 'POST', body: fd });
+          const blob2 = await res2.blob();
+          const dlName2 = (droppedFile.name.replace(/\.srt$/i, '') || 'subtitle') + '.' + targetSel.value + '.srt';
+          cacheAndShowDownload(blob2, dlName2);
+          hint.textContent = 'Finished. Click “Download translated file”.';
+          submitBtn.disabled = false; submitBtn.textContent = 'Translate'; prog.style.display = 'none';
+        }
+      }
+    }
+  }
+});
+</script>
+</body>
+</html>

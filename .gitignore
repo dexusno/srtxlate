@@ -1,0 +1,21 @@
+# Env og sensitive
+.env
+*.secret
+
+# Python og byggegjenstander
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+
+# Docker og midlertidig
+*.log
+docker-compose.override.yml
+
+# Modellfiler
+models/
+
+# Windows/macOS metadata
+Thumbs.db
+.DS_Store
