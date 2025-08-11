@@ -73,8 +73,9 @@ LIBRE_ENDPOINT=http://libretranslate:5000
 LIBRE_API_KEY=
 
 ### 3) Build & run (CPU) for GPU, see the GPU section below)
-
 ```
+Build
+```bash
 docker compose up -d --build
 ```
 
