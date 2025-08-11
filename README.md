@@ -55,14 +55,14 @@ Workflow:
 - For **GPU on Windows**, Docker Desktop using **WSL2** with GPU support enabled
 - For **GPU on Linux**, install **NVIDIA Container Toolkit**
 
-### 1) Clone
+### 1) Clone Repo
 
 ```bash
 git clone https://github.com/dexusno/srtxlate.git
 cd srtxlate
 ```
 
-### 2) Check `.env`
+### 2) (Optional) Modify `.env` for defaults
 
 ```ini
 DEFAULT_SOURCE=en
@@ -71,9 +71,8 @@ DEFAULT_ENGINE=auto
 NLLB_ENDPOINT=http://nllb:6100
 LIBRE_ENDPOINT=http://libretranslate:5000
 LIBRE_API_KEY=
-```
 
-### 3) Build & run (CPU or GPU — see GPU section below)
+### 3) Build & run (CPU) for GPU, see the GPU section below)
 
 ```bash
 docker compose up -d --build
@@ -81,11 +80,12 @@ docker compose up -d --build
 
 Open the UI: **http://localhost:8080**
 
-- Drop an `.srt`, pick **Source** / **Target** by **name**, choose engine (Auto is fine), click **Translate**.
+- Drop an `.srt`, pick **Source** / **Target** language, choose engine (Auto is fine), click **Translate**.
 - Progress updates (“Lines: X/Y processed”) stream during the job.
 - Click **Download translated .srt** when it’s ready.
 
-> The first translation triggers a one‑time model download in the `nllb` container (several GB, depending on model). Subsequent runs reuse the cache.
+> The first translation triggers a one‑time model download in the `nllb` container (several GB, depending on model. Subsequent runs reuse the cache.  
+> We default to the largest 3.3Gb nllb model, but there are several other smaller models available on the nllb page (links below).  Change the model in the docker-compose.yml file if you have a low vram gpu or want a lighter model.
 
 ---
 
