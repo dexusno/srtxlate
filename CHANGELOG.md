@@ -1,17 +1,34 @@
 # Changelog
+All notable changes to this project will be documented in this file.  
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),  
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] – 2025-08-11
+## [1.0.0] - 2025-08-11
 ### Added
-- Multi-language selection via `flores200.json`.
-- Web UI dropdown for 200+ languages with names.
-- Automatic output file suffix handling based on FLORES-200 codes.
-- `docker-compose.gpu.yml` for GPU-accelerated deployments.
-- Detailed README.md with step-by-step install guides (Windows & Linux).
-- Credits and attribution for upstream projects.
+- Initial public release of **SRTXlate** subtitle translation tool.
+- Full **multi-language translation support** using the FLORES-200 language list via `flores200.json`.
+- Web-based user interface with:
+  - Source language selection
+  - Target language selection
+  - Translation engine selection (NLLB or LibreTranslate)
+  - Clear button for easy reset
+- CLI support via `curl` for scripted translations without GUI.
+- Automatic filename suffix replacement using ISO-639-1 codes where possible.
+- Docker-based deployment for easy installation and isolation.
+- CPU and GPU modes for NLLB (GPU with `docker-compose.gpu.yml`).
+- Preconfigured `flores200.json` containing all FLORES-200 languages.
 
 ### Changed
-- Improved UI layout with balanced button sizing.
-- Removed Python CLI instructions in favor of cURL API usage.
+- UI layout improvements for balanced dropdown/button alignment.
+- README.md rewritten to include:
+  - Full installation instructions (Windows & Linux).
+  - Detailed usage examples.
+  - GPU/CPU setup guidance.
+  - Server-only usage without GUI.
+- Project name updated to reflect multilingual capabilities.
 
-### Fixed
-- Language list now loads dynamically from JSON.
+### Notes
+- NLLB model is **not included** in the repo; it must be downloaded separately.
+- No Python CLI wrapper — HTTP API (`curl`) is the recommended method for automation.
+
+---
