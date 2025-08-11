@@ -37,10 +37,11 @@ Compose services:
 - **nllb** — Transformers service running an NLLB‑200 model (downloads on first run; cached in a Docker volume)
 - **libretranslate** — optional fallback API (Argos‑Translate based)
 
-Data flow:
+Workflow:
 
-- `app` → `nllb` via HTTP (`POST /translate`) for **batched** line translation  
-- UI listens to `GET /translate_sse?key=...` for **progress events**
+1. `app` sends batched lines to `nllb` via `POST /translate`  
+2. Browser listens with `GET /translate_sse?key=...` to display progress  
+3. UI pulls live results as they’re translated
 
 **Model conversion?** None needed. We use the PyTorch models from Huggingface directly; the container downloads them on demand. No CT2/ONNX conversion is required for this setup.
 
