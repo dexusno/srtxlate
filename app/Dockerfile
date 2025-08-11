@@ -1,23 +1,29 @@
-# app/Dockerfile
 FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+# System deps (optional but useful for locale/regex performance)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl locales tzdata build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    tini ca-certificates locales && \
+    rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Python deps
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-RUN mkdir -p /app/templates /app/static
+# App code
+COPY main.py /app/main.py
+COPY srtxlate.py /app/srtxlate.py
+COPY templates/ /app/templates/
 
-COPY main.py srtxlate.py argos_init.py /app/
-COPY templates/index.html /app/templates/
-COPY static/style.css /app/static/
-
-# Pre-install Argos model en->nb at build time
-RUN python /app/argos_init.py
+# Ensure static dir exists and copy assets (flores200.json lives here)
+RUN mkdir -p /app/static
+COPY static/ /app/static/
 
 EXPOSE 8080
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+
+ENTRYPOINT ["/usr/bin/tini","--"]
+CMD ["uvicorn","main:app","--host","0.0.0.0","--port","8080"]

@@ -1,194 +1,260 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <title>SRT → Norsk Bokmål</title>
-  <link rel="stylesheet" href="/static/style.css"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta charset="utf-8" />
+  <title>SRT Translator (NLLB-200)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    .progress { height: 10px; background: #333; border-radius: 6px; overflow: hidden; margin-top: 8px; display: none; }
-    .bar { height:100%; width:0%; background:#3b82f6; transition: width .2s; }
-    .row small { opacity: .7; }
-    .actions { display:flex; gap:10px; align-items:center; margin-top:12px; }
-    #dlBtn { display:none; background:#10b981; border:0; color:white; padding:8px 12px; border-radius:10px; font-weight:700; }
-    #dlBtn[disabled] { opacity:.6; cursor:not-allowed; }
+    :root {
+      --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb;
+      --accent:#2563eb; --accent-2:#60a5fa; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; --border:#1f2937;
+      --drop-border:#3b82f6; --drop-bg: rgba(37,99,235,0.08);
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background: radial-gradient(1200px 600px at 70% -20%, #1f2937 0%, var(--bg) 60%);
+      color:var(--text); font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue",Arial,"Noto Sans"; line-height:1.4; }
+    .wrap { max-width:980px; margin:40px auto; padding:0 16px 48px; }
+    .card { background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 60%), var(--panel);
+      border:1px solid var(--border); border-radius:16px; padding:24px; box-shadow:0 10px 30px rgba(0,0,0,0.35); }
+    h1 { margin:0 0 12px; font-size:24px; }
+    p.lead { margin:0 0 20px; color:var(--muted); }
+    label { display:block; margin:14px 0 6px; color:var(--muted); font-size:14px; }
+    select, button { padding:10px 12px; background:#0b1220; color:var(--text); border:1px solid var(--border); border-radius:10px; outline:none; width:100%; }
+    .grid { display:grid; grid-template-columns: repeat(12, 1fr); gap:12px; }
+    .col-12 { grid-column: span 12; } .col-6 { grid-column: span 6; }
+    .btns { display:flex; gap:12px; margin-top:12px; }
+    button.primary { background: linear-gradient(180deg, var(--accent), var(--accent-2)); color:white; border:0; border-radius:10px; font-weight:600; cursor:pointer; }
+    button.secondary { background:#0b1220; color:var(--text); border:1px solid var(--border); cursor:pointer; }
+    .block { width:100%; }
+
+    .dropzone { position:relative; border:2px dashed var(--border); border-radius:14px; padding:24px; background: rgba(255,255,255,0.02); text-align:center; transition: border-color .15s, background-color .15s; }
+    .dropzone.dragover { border-color: var(--drop-border); background: var(--drop-bg); }
+    .dropzone .hint { color: var(--muted); margin-top: 6px; font-size: 14px; }
+    .dropzone .picked { margin-top: 8px; font-size: 14px; }
+    .file-input-overlay { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+
+    .statusbox { margin-top:12px; padding:10px 12px; border:1px dashed var(--border); border-radius:10px; background: rgba(255,255,255,0.02); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
+    a.download { display:inline-block; margin-top:12px; color:#93c5fd; text-decoration:none; }
   </style>
 </head>
 <body>
-  <main>
-    <h1>SRT Translator</h1>
-    <form id="form" action="/translate" method="post" enctype="multipart/form-data">
-      <div class="row"><label>Source:</label>
-        <select name="source" id="source">
-          <option value="en" selected>English (en)</option>
-          <option value="auto">Auto</option>
-        </select>
+  <div class="wrap">
+    <div class="card">
+      <h1>SRT Translator (NLLB-200)</h1>
+      <p class="lead">Drop an <code>.srt</code> and choose languages by name. Defaults: English → Norwegian Bokmål.</p>
+
+      <div class="grid">
+        <div class="col-12">
+          <label for="dropzone">Subtitle file (.srt)</label>
+          <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Drop SRT file here or click to choose">
+            <strong>Drop .srt file here</strong>
+            <div class="hint">…or click to choose</div>
+            <div id="picked" class="picked mono" aria-live="polite"></div>
+            <input id="file" class="file-input-overlay" type="file" accept=".srt" aria-label="Choose SRT file" />
+          </div>
+        </div>
+
+        <div class="col-6">
+          <label for="source">Source language</label>
+          <select id="source"></select>
+        </div>
+
+        <div class="col-6">
+          <label for="target">Target language</label>
+          <select id="target"></select>
+        </div>
+
+        <div class="col-6">
+          <label for="engine">Engine</label>
+          <select id="engine">
+            <option value="auto" selected>Auto</option>
+            <option value="nllb">NLLB (Transformers)</option>
+            <option value="libre">LibreTranslate</option>
+            <option value="argos">Argos Translate</option>
+          </select>
+        </div>
+        <div class="col-6" style="display:flex; align-items:flex-end;">
+          <button id="btn-clear" class="secondary block" title="Clear">Clear</button>
+        </div>
       </div>
-      <div class="row"><label>Target:</label>
-        <select name="target" id="target">
-          <option value="nb" selected>Norwegian Bokmål (nb)</option>
-          <option value="no">Norwegian (no → nb)</option>
-          <option value="nn">Norwegian Nynorsk (nn)</option>
-        </select>
+
+      <div class="btns">
+        <button id="btn-translate" class="primary block" title="Start translation">Translate</button>
       </div>
-      <div class="row"><label>Engine:</label>
-        <select name="engine" id="engine">
-          <option value="auto" selected>Auto (CT2 → LT → Argos)</option>
-          <option value="ct2">CTranslate2 (Marian OPUS‑MT)</option>
-          <option value="libre">LibreTranslate API</option>
-          <option value="argos">Argos (local/offline)</option>
-        </select>
+
+      <div class="statusbox mono" role="status" aria-live="polite">
+        <div id="progressText">Loading languages…</div>
       </div>
-      <div class="row">
-        <label></label>
-        <label><input type="checkbox" id="live"> Show progress (SSE)</label>
-        <small>Streams progress with minimal overhead.</small>
-      </div>
-      <div id="drop" class="dropzone">
-        <p id="hint">Drop .srt here or click to choose</p>
-        <p id="fname" style="opacity:.8"></p>
-        <input id="file" type="file" name="file" accept=".srt" hidden />
-      </div>
-      <div class="progress" id="prog"><div class="bar" id="bar"></div></div>
-      <div class="actions">
-        <button id="submitBtn" type="submit">Translate</button>
-        <button id="dlBtn" type="button" disabled>Download translated file</button>
-      </div>
-    </form>
-  </main>
 
-<script>
-const drop = document.getElementById('drop');
-const fileInput = document.getElementById('file');
-const hint = document.getElementById('hint');
-const fname = document.getElementById('fname');
-const form = document.getElementById('form');
-const submitBtn = document.getElementById('submitBtn');
-const sourceSel = document.getElementById('source');
-const targetSel = document.getElementById('target');
-const engineSel = document.getElementById('engine');
-const liveChk = document.getElementById('live');
-const prog = document.getElementById('prog');
-const bar = document.getElementById('bar');
-const dlBtn = document.getElementById('dlBtn');
+      <a id="download" class="download" href="#" download style="display:none;">Download translated .srt</a>
+    </div>
+  </div>
 
-let droppedFile = null;
-let lastBlobUrl = null;
-let lastFilename = null;
-let lastFormData = null;
+  <script>
+    // Loaded at runtime from /static/flores200.json
+    // Each entry: { "name": "Norwegian Bokmål", "code": "nob_Latn" }
+    let LANGS = [];
+    const APP_TRANSLATE_ENDPOINT = "/translate";
+    const APP_PROGRESS_SSE      = "/translate_sse";
 
-function resetDownloadState() {
-  if (lastBlobUrl) {
-    URL.revokeObjectURL(lastBlobUrl);
-    lastBlobUrl = null;
-  }
-  lastFilename = null;
-  dlBtn.style.display = 'none';
-  dlBtn.disabled = true;
-}
+    const dz = document.getElementById("dropzone");
+    const elFile = document.getElementById("file");
+    const elPicked = document.getElementById("picked");
+    const elSrc = document.getElementById("source");
+    const elTgt = document.getElementById("target");
+    const elEng = document.getElementById("engine");
+    const elBtn = document.getElementById("btn-translate");
+    const elClear = document.getElementById("btn-clear");
+    const elProgress = document.getElementById("progressText");
+    const elDown = document.getElementById("download");
 
-function setChosen(name) {
-  fname.textContent = name;
-  hint.textContent = 'Ready. Click “Translate”.';
-  resetDownloadState();
-}
+    let selectedFile = null;
+    let progressKey = null;
+    let sse;
 
-drop.addEventListener('click', () => fileInput.click());
+    async function loadLangs() {
+      const res = await fetch("/static/flores200.json", { cache: "no-store" });
+      if (!res.ok) throw new Error("Cannot load flores200.json");
+      LANGS = await res.json();
 
-fileInput.addEventListener('change', () => {
-  droppedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
-  if (droppedFile) setChosen(droppedFile.name);
-});
-
-drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
-drop.addEventListener('dragleave', e => { e.preventDefault(); drop.classList.remove('over'); });
-drop.addEventListener('drop', e => {
-  e.preventDefault();
-  drop.classList.remove('over');
-  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-  if (f && f.name.toLowerCase().endsWith('.srt')) {
-    droppedFile = f;
-    setChosen(f.name);
-  } else {
-    hint.textContent = 'Please drop a .srt file';
-  }
-});
-
-function cacheAndShowDownload(blob, filename) {
-  if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
-  lastBlobUrl = URL.createObjectURL(blob);
-  lastFilename = filename;
-  dlBtn.style.display = 'inline-block';
-  dlBtn.disabled = false;
-}
-
-dlBtn.addEventListener('click', () => {
-  if (!lastBlobUrl || !lastFilename) return;
-  const a = document.createElement('a');
-  a.href = lastBlobUrl;
-  a.download = lastFilename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-});
-
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  if (!droppedFile) { hint.textContent = 'Select or drop a .srt file first'; return; }
-
-  submitBtn.disabled = true; submitBtn.textContent = 'Translating…';
-  dlBtn.disabled = true;
-
-  const fd = new FormData();
-  fd.append('file', droppedFile, droppedFile.name);
-  fd.append('source', sourceSel.value);
-  fd.append('target', targetSel.value);
-  fd.append('engine', engineSel.value);
-  lastFormData = fd; // for optional re-fetch if needed
-
-  if (!liveChk.checked) {
-    const res = await fetch('/translate', { method: 'POST', body: fd });
-    if (!res.ok) { hint.textContent = 'Server error: ' + res.status; submitBtn.disabled=false; submitBtn.textContent='Translate'; return; }
-    const blob = await res.blob();
-    const dlName = (droppedFile.name.replace(/\.srt$/i, '') || 'subtitle') + '.' + targetSel.value + '.srt';
-    cacheAndShowDownload(blob, dlName);
-    hint.textContent = 'Finished. Click “Download translated file”.';
-    submitBtn.disabled = false; submitBtn.textContent = 'Translate';
-    return;
-  }
-
-  // Streaming progress (SSE)
-  prog.style.display = 'block'; bar.style.width = '0%';
-  const resp = await fetch('/translate_sse', { method: 'POST', body: fd });
-  if (!resp.ok) { hint.textContent = 'Server error: ' + resp.status; submitBtn.disabled=false; submitBtn.textContent='Translate'; prog.style.display='none'; return; }
-
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-
-  while (true) {
-    const {value, done} = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, {stream: true});
-    let idx;
-    while ((idx = buf.indexOf('\n\n')) >= 0) {
-      const chunk = buf.slice(0, idx); buf = buf.slice(idx+2);
-      if (chunk.startsWith('data:')) {
-        const data = JSON.parse(chunk.slice(5).trim());
-        if (data.progress !== undefined) bar.style.width = (data.progress + '%');
-        if (data.done) {
-          // Fetch final file once; do not auto-download, just enable the button.
-          const res2 = await fetch('/translate', { method: 'POST', body: fd });
-          const blob2 = await res2.blob();
-          const dlName2 = (droppedFile.name.replace(/\.srt$/i, '') || 'subtitle') + '.' + targetSel.value + '.srt';
-          cacheAndShowDownload(blob2, dlName2);
-          hint.textContent = 'Finished. Click “Download translated file”.';
-          submitBtn.disabled = false; submitBtn.textContent = 'Translate'; prog.style.display = 'none';
-        }
-      }
+      fillLangs();
+      setText("Ready.");
     }
-  }
-});
-</script>
+
+    function fillLangs() {
+      const make = (sel, defCode) => {
+        sel.innerHTML = "";
+        const sorted = [...LANGS].sort((a,b)=>a.name.localeCompare(b.name));
+        for (const { name, code } of sorted) {
+          const opt = document.createElement("option");
+          opt.value = code;
+          const short = code.includes("_") ? code.split("_")[0] : code;
+          opt.textContent = `${name} (${short})`;
+          if (code === defCode) opt.selected = true;
+          sel.appendChild(opt);
+        }
+      };
+      make(elSrc, "eng_Latn");
+      make(elTgt, "nob_Latn");
+    }
+
+    // Prevent default navigation on drop anywhere
+    ["dragenter","dragover","dragleave","drop"].forEach(evt => {
+      window.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); });
+    });
+    ["dragenter","dragover"].forEach(evt => dz.addEventListener(evt, e => { e.preventDefault(); dz.classList.add("dragover"); }));
+    ["dragleave","drop","blur"].forEach(evt => dz.addEventListener(evt, () => dz.classList.remove("dragover")));
+
+    elFile.addEventListener("change", () => {
+      if (elFile.files && elFile.files[0]) { selectedFile = elFile.files[0]; elPicked.textContent = selectedFile.name; }
+    });
+    dz.addEventListener("drop", (e) => {
+      const dt = e.dataTransfer;
+      if (!dt || !dt.files || !dt.files.length) return;
+      const f = dt.files[0];
+      if (!/\.srt$/i.test(f.name)) { setText("Please drop a .srt file."); return; }
+      selectedFile = f; elPicked.textContent = selectedFile.name;
+      try { const t = new DataTransfer(); t.items.add(f); elFile.files = t.files; } catch(_) {}
+    });
+    dz.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); elFile.click(); } });
+    dz.addEventListener("click", () => elFile.click());
+
+    function setText(msg){ elProgress.textContent = msg; }
+    function uuid(){ return (crypto.randomUUID && crypto.randomUUID()) || (Math.random().toString(36).slice(2) + Date.now()); }
+
+    function startSSE(key) {
+      stopSSE();
+      try {
+        sse = new EventSource(`${APP_PROGRESS_SSE}?key=${encodeURIComponent(key)}`);
+        sse.onmessage = (e) => {
+          if (!e?.data) return;
+          try {
+            const p = JSON.parse(e.data);
+            const total = p.total|0, done = p.done|0, remaining = p.remaining|0, finished = !!p.finished;
+            if (total > 0) setText(`Lines: ${done}/${total} processed (${remaining} remaining)${finished ? " — done." : ""}`);
+            else setText("Starting…");
+          } catch { /* ignore non-JSON */ }
+        };
+      } catch(_) {}
+    }
+    function stopSSE(){ try { if (sse) sse.close(); } catch(_){} }
+
+    // Parse filename from Content-Disposition (server decides final name)
+    function filenameFromContentDisposition(headerValue) {
+      if (!headerValue) return null;
+      const mStar = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(headerValue);
+      if (mStar) {
+        try { return decodeURIComponent(mStar[1].replace(/["]/g,'')); } catch { return mStar[1]; }
+      }
+      const m = /filename\s*=\s*"?([^";]+)"?/i.exec(headerValue);
+      return m ? m[1] : null;
+    }
+
+    async function translateFile() {
+      const file = selectedFile || (elFile.files && elFile.files[0]);
+      if (!file) { setText("Select or drop an .srt file first."); return; }
+
+      const source = elSrc.value; // FLORES code
+      const target = elTgt.value; // FLORES code
+
+      elDown.style.display = "none"; elDown.href = "#"; elDown.download = "";
+      progressKey = uuid();
+      setText("Starting…");
+      startSSE(progressKey);
+
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("source", source);
+      fd.append("target", target);
+      fd.append("engine", elEng.value);
+      fd.append("progress_key", progressKey);
+
+      let resp;
+      try { resp = await fetch(APP_TRANSLATE_ENDPOINT, { method:"POST", body: fd }); }
+      catch { stopSSE(); setText("Network error posting to /translate. See logs."); return; }
+
+      stopSSE();
+
+      if (!resp.ok) {
+        const t = await resp.text().catch(()=>"");
+        setText(`Server error (${resp.status}): ${t || "see logs"}`);
+        return;
+      }
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+
+      // Prefer server-provided filename (already strips .eng and uses ISO 2-letter like nb)
+      let outName = filenameFromContentDisposition(resp.headers.get("Content-Disposition"));
+
+      // Fallback client-side name if header missing
+      if (!outName) {
+        const base = file.name
+          .replace(/\.srt$/i, "")
+          .replace(/\.[a-z]{2,3}$/i, ""); // strip trailing .en/.eng/.nob etc.
+        const short = target.includes("_") ? target.split("_")[0] : "xx";
+        outName = `${base}.${short}.srt`;
+      }
+
+      elDown.href = url; elDown.download = outName; elDown.style.display = "inline-block";
+      setText("Done. Download is ready below.");
+    }
+
+    function clearAll() {
+      selectedFile = null; elFile.value = ""; elPicked.textContent = "";
+      elDown.style.display = "none"; elDown.href = "#"; elDown.download = "";
+      setText("Ready."); stopSSE();
+    }
+
+    document.getElementById("btn-translate").addEventListener("click", translateFile);
+    elClear.addEventListener("click", clearAll);
+
+    // Populate languages from JSON and go
+    loadLangs().catch(err => {
+      console.error(err);
+      setText("Failed to load language list. See console.");
+    });
+  </script>
 </body>
 </html>

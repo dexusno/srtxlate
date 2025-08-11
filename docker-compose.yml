@@ -1,68 +1,56 @@
 services:
   libretranslate:
     image: libretranslate/libretranslate:latest
-    container_name: libretranslate
-    environment:
-      # Only load what you need (keeps the image light and startup faster)
-      - LT_LOAD_ONLY=en,nb
     ports:
       - "5000:5000"
-    restart: unless-stopped
-    # Docs for LT_* envs: see the official README / Docker Hub. 
-    # (Env vars like LT_LOAD_ONLY are supported and commonly used.) 
-
-  ct2:
-    build:
-      context: ./ct2
-      dockerfile: Dockerfile
-    container_name: ct2
     environment:
-      # Point CT2 to the converted Marian model and the locally saved tokenizer
-      - CT2_MODEL_DIR=/models/en-nor-ct2
-      - CT2_TOKENIZER_SRC=/models/en-nor-ct2/tokenizer
-      # Runtime / performance knobs
-      - CT2_DEVICE=cpu              # change to "cuda" after enabling GPU in Compose/Docker
-      - CT2_COMPUTE_TYPE=default    # e.g. "int8" (CPU), "int8_float16" (GPU)
-      - CT2_BEAM_SIZE=1             # greedy search = fastest
-      - CT2_MAX_BATCH_TOKENS=4096   # token-based batching for throughput
-      - CT2_INTRA_THREADS=0         # 0 = let CT2 pick based on cores
-      - CT2_INTER_THREADS=1         # parallel requests; 1 for single-job throughput
-      - CT2_NO_REPEAT_NGRAM=3       # anti-repetition for subtitle-style lines
-      - CT2_REPETITION_PENALTY=1.2
-    volumes:
-      - ./models:/models
-    ports:
-      - "6000:6000"
-    restart: unless-stopped
-    # GPU (optional): enable after installing NVIDIA Container Toolkit and validating GPU access.
-    # See: Docker docs on Compose GPU support.
-    # Example:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - capabilities: ["gpu"]
-    # On Docker Desktop you can also use:
-    # gpus: all
-
-  srtxlate:
-    build:
-      context: ./app
-      dockerfile: Dockerfile
-    container_name: srtxlate
-    env_file:
-      - .env
-    environment:
-      # Tell the web app where the backends live
-      - LIBRE_ENDPOINT=http://libretranslate:5000
-      - CT2_ENDPOINT=http://ct2:6000
-      # Defaults (can also sit in .env)
       - DEFAULT_SOURCE=en
       - DEFAULT_TARGET=nb
-      - DEFAULT_ENGINE=auto        # auto = prefer CT2 -> LibreTranslate -> Argos
-    depends_on:
-      - libretranslate
-      - ct2
+    volumes:
+      - libre-data:/data
+
+  nllb:
+    build:
+      context: ./nllb
+    environment:
+      - NLLB_MODEL=facebook/nllb-200-3.3B
+      - NLLB_DEVICE=cuda
+      # Smoother GPU usage
+      - NLLB_BATCH_SIZE=16
+      - NLLB_MAX_NEW_TOKENS=256
+      - NLLB_NUM_BEAMS=1
+      # Cap CPU threads used by libs inside the container
+      - OMP_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+      - TORCH_NUM_THREADS=2
+    volumes:
+      - nllb-cache:/models/.cache/huggingface
+    ports:
+      - "6100:6100"
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  app:
+    build:
+      context: ./app
     ports:
       - "8080:8080"
-    restart: unless-stopped
+    depends_on:
+      - libretranslate
+      - nllb
+    environment:
+      - DEFAULT_SOURCE=en
+      - DEFAULT_TARGET=nb
+      - DEFAULT_ENGINE=auto
+      - NLLB_ENDPOINT=http://nllb:6100
+      - LIBRE_ENDPOINT=http://libretranslate:5000
+
+volumes:
+  libre-data:
+  nllb-cache:

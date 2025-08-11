@@ -1,0 +1,15 @@
+# repo/host clutter
+.git/
+*.zip
+*.srt
+*.log
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+
+# local env
+.env
+
+# large model folders not needed in images
+models/
