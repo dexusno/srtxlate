@@ -15,6 +15,20 @@ This PowerShell script automates the process of checking media files for existin
 - **Progress reporting:** Shows live translation progress via SSE (server-sent events) in the console.
 - **HI/SDH preference:** Prefers normal English subtitles over hearing-impaired versions unless only HI versions exist.
 
+
+## Windows (PowerShell) Requirements
+
+- **PowerShell 5.1+** (default in Windows 10/11) or **PowerShell 7.x**
+- **FFmpeg suite** (`ffmpeg.exe`, `ffprobe.exe`) installed and added to `PATH`
+  - Download from: [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html)
+- **curl.exe**  
+  - Included in Windows 10/11 by default  
+  - Alternatively, install [Git for Windows](https://git-scm.com/downloads) which includes curl
+- **Local or remote srtxlate API server** running and reachable
+  - Default: `http://localhost:8080`
+- Network access to the API (if remote)
+- Write access to the folders containing media and subtitles
+
 ## How It Works
 
 1. **Scan folder** for supported media files.
@@ -338,6 +352,21 @@ DELETE_TEMP_EXTRACTED_ENG=1 \
 ./media-sub-xlate.sh /media/library
 
 ```
+## Linux (Bash) Requirements
+
+- **Bash shell** (tested with GNU bash 4.4+)
+- **FFmpeg suite** (`ffmpeg`, `ffprobe`) installed and available in `PATH`
+  - Debian/Ubuntu: `sudo apt install ffmpeg`
+- **curl** installed
+  - Debian/Ubuntu: `sudo apt install curl`
+- **jq** for JSON parsing
+  - Debian/Ubuntu: `sudo apt install jq`
+- **uuidgen** for unique progress keys
+  - Debian/Ubuntu: `sudo apt install uuid-runtime`
+- **Local or remote srtxlate API server** running and reachable
+  - Default: `http://localhost:8080`
+- Network access to the API (if remote)
+- Write access to the folders containing media and subtitles
 ## Script: ##
 
 ```
