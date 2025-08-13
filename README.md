@@ -1,6 +1,6 @@
 # srtxlate — Multi‑Language Subtitle (.SRT) Translator (NLLB‑200)
 
-Translate `.srt` subtitle files between **200+ languages** via a minimal **web UI** (drag‑and‑drop) or a scriptable **HTTP API**.  
+Translate `.srt` subtitle files between **200+ languages** via a small **web UI** (drag‑and‑drop) or a scriptable **HTTP API**.  
 Quality is provided by **Meta’s NLLB‑200** models through Hugging Face Transformers; **LibreTranslate/Argos** remains an optional fallback.  
 Everything runs in **Docker** for easy local use and server deployment. Works **offline** once models are cached or provided locally.
 
