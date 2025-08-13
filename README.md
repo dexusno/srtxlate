@@ -16,7 +16,7 @@ Everything runs in **Docker** for easy local use and server deployment. Works **
 - **Local model support** (`MODEL_DIR`) with `local_files_only=True`
 - **/healthz** exposes model/device state from each service
 
-> **NLLB‑200 note:** We set the **forced BOS token** from FLORES codes (e.g., `eng_Latn`). No manual model conversion is required; PyTorch models are pulled from Hugging Face on first run, or loaded locally if present in `MODEL_DIR`.
+> **NLLB‑200 note:** We set the **forced BOS token** from FLORES codes (e.g., `eng_Latn`). No manual model conversion is required; PyTorch models are pulled from Hugging Face from the setup scripts, then run locally from the `MODEL` folder.
 
 ---
 
@@ -73,7 +73,7 @@ cd srtxlate
 
 ### 2) Run setup
 
-Use the interactive PowerShell menu (Windows/PowerShell). It builds/starts services and can run health checks.
+Use the interactive PowerShell/Bash menu-driven scripts. They both builds/starts services and can run health checks.
 
 Windows:
 ```powershell
