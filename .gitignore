@@ -1,21 +1,61 @@
-# Env og sensitive
+# ---- srtxlate: core ignores ----
+# env/config
 .env
-*.secret
+*.env.local
 
-# Python og byggegjenstander
+# Python bytecode / tooling
 __pycache__/
-*.py[cod]
-build/
-dist/
-*.egg-info/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+.mypy_cache/
+.venv/
+.venv*/
+pip-wheel-metadata/
 
-# Docker og midlertidig
-*.log
-docker-compose.override.yml
-
-# Modellfiler
-models/
-
-# Windows/macOS metadata
-Thumbs.db
+# Editors / OS cruft
 .DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs & artifacts
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Local data / examples
+*.srt
+!app/templates/*.srt
+
+# Docker & compose junk (not source)
+*.pid
+*.pid.lock
+
+# Hugging Face model snapshots and cache
+models/
+!models/.gitkeep
+models_cache/
+
+# Node-style caches just in case
+node_modules/
+
+# Coverage
+.coverage
+htmlcov/
+coverage.xml
+
+# Build outputs
+dist/
+build/
+
+# PyInstaller
+*.spec
+
+# JetBrains & Rider
+*.iml
+.idea/
+
+# End of file

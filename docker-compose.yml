@@ -13,32 +13,33 @@ services:
     build:
       context: ./nllb
     environment:
-      - NLLB_MODEL=facebook/nllb-200-3.3B
-      - NLLB_DEVICE=cuda
-      # Smoother GPU usage
-      - NLLB_BATCH_SIZE=16
-      - NLLB_MAX_NEW_TOKENS=256
-      - NLLB_NUM_BEAMS=1
-      # Cap CPU threads used by libs inside the container
-      - OMP_NUM_THREADS=2
-      - MKL_NUM_THREADS=2
-      - TORCH_NUM_THREADS=2
+      # Force CPU in this variant
+      - NLLB_DEVICE=cpu
+      # Prefer local model folder (from .env), fallback path 'current' if not set
+      - NLLB_MODEL_DIR=/models/${NLLB_MODEL_LOCAL:-current}
+      # Keep HF cache
+      - HF_HOME=/models_cache
+      # Harmless on CPU
+      - TORCH_CUDA_ALLOC_CONF=max_split_size_mb:64
+      # Also pass through hub id fallback from .env
+      - NLLB_MODEL=${NLLB_MODEL}
     volumes:
-      - nllb-cache:/models/.cache/huggingface
+      # Cache volume (keep as you had)
+      - ./models_cache:/models_cache
+      # Local models (read-only)
+      - ./models:/models:ro
     ports:
-      - "6100:6100"
+      - "127.0.0.1:6100:6100"
+    shm_size: "2gb"
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
   app:
     build:
       context: ./app
+      dockerfile: Dockerfile
+    container_name: srtxlate_app
+    env_file:
+      - .env
     ports:
       - "8080:8080"
     depends_on:
@@ -53,4 +54,3 @@ services:
 
 volumes:
   libre-data:
-  nllb-cache:

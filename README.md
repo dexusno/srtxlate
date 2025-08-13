@@ -72,8 +72,8 @@ NLLB_ENDPOINT=http://nllb:6100
 LIBRE_ENDPOINT=http://libretranslate:5000
 LIBRE_API_KEY=
 
+```
 ### 3) Build & run (CPU) for GPU, see the GPU section below)
-
 ```bash
 docker compose up -d --build
 ```

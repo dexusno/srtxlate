@@ -1,212 +1,253 @@
+# srtxlate.py — SRT helpers + engines (NLLB + Libre fallback) with cue-aware batching
 import re
 import unicodedata
 from typing import List, Tuple, Dict, Callable, Optional
 import requests
 
-# --- Tag protection (keep HTML-like tags intact) ---
+# -----------------------------
+# Unicode helpers
+# -----------------------------
+def _nfc(s: str) -> str:
+    """Normalize string to NFC form."""
+    return unicodedata.normalize("NFC", s or "")
+
+def _strip_bom(line: str) -> str:
+    # Handle BOM on very first line (can break the index parse)
+    return line.lstrip("\ufeff") if line else line
+
+# -----------------------------
+# Tag protection (keep HTML-ish tags intact during translation)
+# -----------------------------
 _TAG_RE = re.compile(r"<[^>]+>")
 
-def _protect_tags(text: str):
-    tags = {}
-    def repl(m):
+def _protect_tags(text: str) -> Tuple[str, Dict[str, str]]:
+    """Replace tags with placeholders to protect them from translation."""
+    tags: Dict[str, str] = {}
+
+    def _replace(m):
         key = f"__TAG{len(tags)}__"
         tags[key] = m.group(0)
         return key
-    return _TAG_RE.sub(repl, text), tags
+
+    protected_text = _TAG_RE.sub(_replace, text)
+    return protected_text, tags
 
 def _restore_tags(text: str, tags: Dict[str, str]) -> str:
-    for k, v in tags.items():
-        text = text.replace(k, v)
+    """Restore placeholders back to original tags."""
+    for key, val in tags.items():
+        text = text.replace(key, val)
     return text
 
-def _nfc(s: str) -> str:
-    return unicodedata.normalize("NFC", s)
-
-# --- SRT helpers ---
+# -----------------------------
+# SRT split/join
+# -----------------------------
 _TIME_RE = re.compile(r"\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}")
-
-def _split_srt(s: str) -> List[List[str]]:
-    chunks = re.split(r"\n{2,}|\r\n\r\n", s.replace("\r\n", "\n"))
-    return [c.split("\n") for c in chunks if c.strip()]
-
-def _join_srt(blocks: List[List[str]]) -> str:
-    return "\n\n".join("\n".join(b) for b in blocks) + "\n"
 
 def _is_index_line(line: str) -> bool:
     return line.strip().isdigit()
 
 def _is_time_line(line: str) -> bool:
-    return bool(_TIME_RE.search(line))
+    return bool(_TIME_RE.search(line or ""))
 
-# --- Language normalization & filename suffix mapping ---
-# Pass-through for valid FLORES codes (code contains "_").
-# Minimal aliases for common ISO-639-1 inputs.
-_ALIAS_TO_FLORES = {
-    "en": "eng_Latn",
-    "eng": "eng_Latn",
-    "nb": "nob_Latn",
-    "no": "nob_Latn",
-    "nob": "nob_Latn",
+def _split_srt(s: str) -> List[List[str]]:
+    """
+    Split SRT file content into a list of blocks (each block is a list of lines).
+    Keeps indices/timestamps untouched. Handles BOM on the first line.
+    """
+    if not s:
+        return []
+    normalized = s.replace("\r\n", "\n").replace("\r", "\n")
+    chunks = re.split(r"\n{2,}", normalized)
+    blocks: List[List[str]] = []
+    for chunk in chunks:
+        if not chunk.strip():
+            continue
+        lines = chunk.split("\n")
+        # Strip BOM on the very first physical line of the file
+        if not blocks and lines:
+            lines[0] = _strip_bom(lines[0])
+        blocks.append(lines)
+    return blocks
+
+def _join_srt(blocks: List[List[str]]) -> str:
+    """Join blocks of lines back into a single SRT string, with trailing newline."""
+    return "\n\n".join("\n".join(block) for block in blocks) + "\n"
+
+# -----------------------------
+# Language normalization and filename suffix mapping
+# -----------------------------
+_alias_to_flores = {
+    "en": "eng_Latn", "eng": "eng_Latn",
+    "nb": "nob_Latn", "no": "nob_Latn", "nob": "nob_Latn",
     "nn": "nno_Latn",
-    "sv": "swe_Latn",
-    "da": "dan_Latn",
-    "fi": "fin_Latn",
-    "de": "deu_Latn",
-    "fr": "fra_Latn",
-    "es": "spa_Latn",
-    "it": "ita_Latn",
-    "pt": "por_Latn",
-    "nl": "nld_Latn",
-    "pl": "pol_Latn",
-    "ru": "rus_Cyrl",
-    "uk": "ukr_Cyrl",
-    "zh": "zho_Hans",
-    "ja": "jpn_Jpan",
-    "ko": "kor_Hang",
-    "tr": "tur_Latn",
-    "ar": "arb_Arab",
+    "sv": "swe_Latn", "da": "dan_Latn", "fi": "fin_Latn",
+    "de": "deu_Latn", "fr": "fra_Latn", "es": "spa_Latn",
+    "it": "ita_Latn", "pt": "por_Latn", "nl": "nld_Latn",
+    "pl": "pol_Latn", "ru": "rus_Cyrl", "uk": "ukr_Cyrl",
+    "zh": "zho_Hans", "ja": "jpn_Jpan", "ko": "kor_Hang",
+    "tr": "tur_Latn", "ar": "arb_Arab",
+    "cs": "ces_Latn", "hu": "hun_Latn", "ro": "ron_Latn",
+    "el": "ell_Grek", "he": "heb_Hebr", "id": "ind_Latn",
+    "vi": "vie_Latn", "th": "tha_Thai", "hi": "hin_Deva",
+    "bn": "ben_Beng", "ur": "urd_Arab", "ta": "tam_Taml",
+    "fa": "pes_Arab", "sr": "srp_Cyrl", "hr": "hrv_Latn",
 }
 
 def normalize_lang_code(code: str) -> str:
     """
-    Normalize to FLORES-200 code used by NLLB.
-    If input already looks like FLORES (has "_"), return as-is.
-    Else map a few common ISO-style aliases; otherwise return input unchanged.
+    Normalize input language code or alias to a FLORES-200 code.
+    If code contains '_', assume it's already a FLORES code.
     """
-    if not code:
-        return "eng_Latn"
-    c = code.strip()
-    if "_" in c:
-        return c
-    lc = c.lower()
-    return _ALIAS_TO_FLORES.get(lc, c)
+    code = (code or "").strip()
+    if "_" in code:
+        return code
+    return _alias_to_flores.get(code.lower(), code)
 
-# Preferred filename suffixes (ISO-639-1 where widely used; else fallback).
-# For codes not in this table, we fall back to the 3-letter part before the underscore.
-_FLORES_TO_SHORT: Dict[str, str] = {
-    "eng_Latn": "en",
-    "nob_Latn": "nb",
-    "nno_Latn": "nn",
-    "swe_Latn": "sv",
-    "dan_Latn": "da",
-    "fin_Latn": "fi",
-    "isl_Latn": "is",
-    "fao_Latn": "fo",
-    "deu_Latn": "de",
-    "fra_Latn": "fr",
-    "spa_Latn": "es",
-    "ita_Latn": "it",
-    "por_Latn": "pt",
-    "nld_Latn": "nl",
-    "pol_Latn": "pl",
-    "ces_Latn": "cs",
-    "slk_Latn": "sk",
-    "hun_Latn": "hu",
-    "ron_Latn": "ro",
-    "ell_Grek": "el",
-    "rus_Cyrl": "ru",
-    "ukr_Cyrl": "uk",
-    "bul_Cyrl": "bg",
-    "srp_Cyrl": "sr",
-    "srp_Latn": "sr",
-    "hrv_Latn": "hr",
-    "bos_Latn": "bs",
-    "slv_Latn": "sl",
-    "sqi_Latn": "sq",
-    "tur_Latn": "tr",
-    "arb_Arab": "ar",
-    "heb_Hebr": "he",
-    "pes_Arab": "fa",
-    "kmr_Latn": "ku",
-    "hin_Deva": "hi",
-    "ben_Beng": "bn",
-    "urd_Arab": "ur",
-    "tam_Taml": "ta",
-    "tel_Telu": "te",
-    "mal_Mlym": "ml",
-    "sin_Sinh": "si",
-    "zho_Hans": "zh",
-    "zho_Hant": "zh",
-    "jpn_Jpan": "ja",
-    "kor_Hang": "ko",
-    "vie_Latn": "vi",
-    "tha_Thai": "th",
-    "ind_Latn": "id",
-    "zsm_Latn": "ms",
-    "tgl_Latn": "tl",
-    "swh_Latn": "sw",
-    "afr_Latn": "af",
-    "amh_Ethi": "am",
-}
+# Short code for filenames (prefer ISO-639-1 where obvious)
+def target_suffix_for_filename(flores_code: str) -> str:
+    inv = {v: k for k, v in _alias_to_flores.items()}
+    return inv.get(flores_code, flores_code.split("_", 1)[0][:3].lower())
 
-def target_suffix_for_filename(target_code: str) -> str:
+# -----------------------------
+# Heuristics for ALL-CAPS sound/stage lines
+# -----------------------------
+# quick “no lowercase” test; tolerant to punctuation/diacritics
+_ALLCAPS_RE = re.compile(r"^[^a-zåäöæøéèáíóúñçß]+$")
+
+def _is_allcaps_marker(line: str) -> bool:
     """
-    Produce a short language suffix for filenames:
-      - Use a preferred ISO-639-1 code when known (from table above).
-      - Else fall back to the 3-letter part before the underscore (FLORES code).
-      - Else 'xx'.
+    Treat short ALL-CAPS cues like [DOOR OPENS], (MUSIC), SIRENS as 'marker-ish'.
+    We do not merge these with neighboring lines so they don't split a sentence.
     """
-    c = normalize_lang_code(target_code)
-    if c in _FLORES_TO_SHORT:
-        return _FLORES_TO_SHORT[c]
-    if "_" in c and len(c) >= 3:
-        return c.split("_", 1)[0]
-    return "xx"
+    txt = _TAG_RE.sub("", line or "").strip()
+    if len(txt) == 0:
+        return False
+    if len(txt) <= 40 and _ALLCAPS_RE.match(txt) and any(ch.isalpha() for ch in txt):
+        return True
+    return False
 
-# --- NLLB batched translate with progress callback ---
+# -----------------------------
+# Reflow helpers (avoid mid-word splits)
+# -----------------------------
+def _split_to_n_lines_preserving_words(text: str, n: int, target_lengths: Optional[List[int]] = None) -> List[str]:
+    """
+    Split 'text' into exactly n lines, preferring spaces near proportional cut points.
+    If target_lengths provided, it guides the approximate lengths per line (based on original lines).
+    Falls back to a last-resort balanced split if no spaces are available.
+    """
+    text = " ".join((text or "").replace("\n", " ").split())  # collapse whitespace
+    if n <= 1:
+        return [text]
+
+    # If we can split exactly by newlines already, do it
+    parts = [p.strip() for p in re.split(r"\r?\n", text) if p.strip()]
+    if len(parts) == n:
+        return parts
+
+    total_len = max(1, len(text))
+    if not target_lengths or len(target_lengths) != n:
+        # proportional targets
+        target_lengths = [round(total_len / n)] * n
+
+    out: List[str] = []
+    start = 0
+    for i in range(n):
+        remaining = text[start:].lstrip()
+        # last piece = rest
+        if i == n - 1:
+            out.append(remaining)
+            break
+
+        # target cut (approx)
+        cut_target = min(len(remaining), max(1, target_lengths[i]))
+        # find nearest space around cut_target (prefer right)
+        best = None
+        # search right
+        r = remaining.find(" ", cut_target)
+        if r != -1:
+            best = r
+        # if not found right, search left
+        if best is None:
+            l = remaining.rfind(" ", 0, cut_target)
+            if l != -1:
+                best = l
+        # if still none, no spaces — do hard cut but avoid breaking multi-byte chars
+        if best is None:
+            best = cut_target
+
+        left = remaining[:best].rstrip()
+        out.append(left)
+        # move start past the space (if we cut on a space)
+        start += len(remaining[:best])
+        # skip one space at boundary if present
+        if start < len(text) and text[start] == " ":
+            start += 1
+
+    # pad empties if something went wrong
+    while len(out) < n:
+        out.append("")
+    return out[:n]
+
+# -----------------------------
+# NLLB service call (batched)
+# -----------------------------
 def _nllb_translate_batched(
     lines: List[str],
     source: str,
     target: str,
     nllb_endpoint: str,
     batch_size: int,
-    glossary: Optional[Dict[str, str]],
+    glossary: Dict[str, str],
     progress_cb: Optional[Callable[[int, int], None]],
 ) -> List[str]:
     if not lines:
         return []
 
-    src = normalize_lang_code(source)
-    tgt = normalize_lang_code(target)
-
-    # Protect tags first to avoid being mangled by MT
-    payload_lines: List[str] = []
-    tag_maps: List[Dict[str, str]] = []
-    for line in lines:
-        t, tags = _protect_tags(line)
-        payload_lines.append(_nfc(t))
-        tag_maps.append(tags)
+    # Protect tags + simple glossary substitutions before sending
+    protected_pairs = []
+    prepped: List[str] = []
+    for ln in lines:
+        ln0, tags = _protect_tags(ln)
+        # tiny glossary (lowercase match)
+        gtext = ln0
+        for k, v in glossary.items():
+            gtext = re.sub(rf"\b{re.escape(k)}\b", v, gtext, flags=re.IGNORECASE)
+        protected_pairs.append(tags)
+        prepped.append(gtext)
 
     out_texts: List[str] = []
-    total_lines = len(payload_lines)
-    done_lines = 0
-
-    # First progress ping (0/N)
+    total = len(prepped)
+    done = 0
     if progress_cb:
-        progress_cb(total_lines, done_lines)
+        progress_cb(total, done)
 
-    for i in range(0, total_lines, max(1, batch_size)):
-        batch = payload_lines[i : i + batch_size]
-        body = {"q": batch, "source": src, "target": tgt}
-        if glossary:
-            body["glossary"] = glossary
-
-        r = requests.post(f"{nllb_endpoint.rstrip('/')}/translate", json=body, timeout=600)
+    for i in range(0, total, max(1, batch_size)):
+        batch = prepped[i : i + batch_size]
+        payload = {
+            "q": batch,
+            "source": source,
+            "target": target,
+            "batch_size": batch_size,
+        }
+        r = requests.post(f"{nllb_endpoint.rstrip('/')}/translate", json=payload, timeout=600)
         r.raise_for_status()
-        outs = r.json().get("translatedText", [])
-        out_texts.extend(outs)
-
-        done_lines = min(total_lines, done_lines + len(batch))
+        data = r.json()
+        out = data.get("translatedText", [])
+        out_texts.extend(out)
+        done = min(total, done + len(batch))
         if progress_cb:
-            progress_cb(total_lines, done_lines)
+            progress_cb(total, done)
 
-    # Restore tags and normalize
-    restored: List[str] = []
-    for text, tags in zip(out_texts, tag_maps):
-        restored.append(_nfc(_restore_tags(text, tags)))
-    return restored
+    # Restore protected tags and normalize
+    restored_lines: List[str] = []
+    for text, tags in zip(out_texts, protected_pairs):
+        restored = _restore_tags(text, tags)
+        restored_lines.append(_nfc(restored))
+    return restored_lines
 
-# --- LibreTranslate fallback (optional) ---
+# -----------------------------
+# LibreTranslate fallback (Argos)
+# -----------------------------
 def _lt_translate_batched(
     lines: List[str],
     source: str,
@@ -214,16 +255,16 @@ def _lt_translate_batched(
     libre_endpoint: str,
     api_key: str,
     batch_size: int,
-    progress_cb: Optional[Callable[[int, int], None]],
+    progress_cb: Optional[Callable[[int, int], None]]
 ) -> List[str]:
     if not lines:
         return []
+    # Use first two letters (ISO-639-1) for LibreTranslate if possible
     src = (source or "en")[:2]
     tgt = (target or "nb")[:2]
-    out: List[str] = []
+    out_lines: List[str] = []
     total_lines = len(lines)
     done_lines = 0
-
     if progress_cb:
         progress_cb(total_lines, done_lines)
 
@@ -236,22 +277,33 @@ def _lt_translate_batched(
         r.raise_for_status()
         res = r.json()
         if isinstance(res, list):
-            out.extend([it.get("translatedText", "") for it in res])
+            out_lines.extend([item.get("translatedText", "") for item in res])
         else:
-            out.extend(res.get("translatedText", []))
+            out_lines.extend(res.get("translatedText", []))
 
         done_lines = min(total_lines, done_lines + len(batch))
         if progress_cb:
             progress_cb(total_lines, done_lines)
 
-    return out
+    return out_lines
 
-# --- Argos no-op (compatibility only) ---
-def _argos_translate(lines: List[str], source: str, target: str,
-                     progress_cb: Optional[Callable[[int, int], None]]) -> List[str]:
+# -----------------------------
+# Argos Translate fallback (last resort no-op)
+# -----------------------------
+def _argos_translate(
+    lines: List[str],
+    source: str,
+    target: str,
+    progress_cb: Optional[Callable[[int, int], None]]
+) -> List[str]:
     if progress_cb:
         progress_cb(len(lines), len(lines))
     return lines
+
+# =============================
+# Translation driver
+# =============================
+_SENTINEL = "__NL__"  # unlikely to be translated; we split on this after translation
 
 def translate_srt_with_progress(
     srt_text: str,
@@ -262,45 +314,80 @@ def translate_srt_with_progress(
     libre_endpoint: str = "http://libretranslate:5000",
     libre_api_key: str = "",
     progress_cb: Optional[Callable[[int, int], None]] = None,
-    batch_size: int = 64,
+    batch_size: int = 64
 ) -> str:
-    # Parse SRT -> blocks
+    # Split into blocks
     blocks = _split_srt(srt_text)
 
-    # Collect text lines to translate, keep their positions
-    text_positions: List[Tuple[int, int]] = []
-    payload: List[str] = []
+    # Build groups to translate (only from text lines)
+    groups: List[str] = []  # what we send to the engine
+    placements: List[Tuple[int, List[int]]] = []  # (block_index, [line_indexes_within_block])
+
     for bi, block in enumerate(blocks):
-        for li, line in enumerate(block):
-            if _is_index_line(line) or _is_time_line(line) or not line.strip():
-                continue
-            text_positions.append((bi, li))
-            payload.append(line)
+        # ensure BOM removed on first line
+        if bi == 0 and block:
+            block[0] = _strip_bom(block[0])
+
+        # Identify the *text* lines in the cue
+        text_idxs = [li for li, line in enumerate(block)
+                     if not _is_index_line(line) and not _is_time_line(line) and (line is not None)]
+        # Keep empty text lines as is — nothing to translate
+        text_idxs = [li for li in text_idxs if block[li].strip() != ""]
+
+        if not text_idxs:
+            continue
+
+        # Partition text lines into runs: marker lines stand alone; others are merged
+        run: List[int] = []
+        for li in text_idxs:
+            line = block[li]
+            if _is_allcaps_marker(line):
+                if run:
+                    merged = f" {_SENTINEL} ".join(block[k] for k in run)
+                    groups.append(merged)
+                    placements.append((bi, run[:]))
+                    run.clear()
+                groups.append(line)          # marker stands alone
+                placements.append((bi, [li]))
+            else:
+                run.append(li)
+
+        if run:
+            merged = f" {_SENTINEL} ".join(block[k] for k in run)
+            groups.append(merged)
+            placements.append((bi, run[:]))
+
+    # Nothing to translate?
+    if not groups:
+        return _join_srt(blocks)
 
     use_engine = (engine or "auto").lower()
     translated: List[str] = []
 
-    # Example glossary for known pain points; extend/disable as needed
+    # very small example glossary; adjust/remove as you like
     glossary = {
         "removal men": "movers",
         "removals men": "movers",
     }
 
+    # Try NLLB first (or only)
     if use_engine in ("nllb", "auto"):
         try:
             translated = _nllb_translate_batched(
-                payload, source, target, nllb_endpoint,
-                batch_size=batch_size, glossary=glossary, progress_cb=progress_cb
+                groups, normalize_lang_code(source), normalize_lang_code(target),
+                nllb_endpoint, batch_size=batch_size,
+                glossary=glossary, progress_cb=progress_cb
             )
         except Exception:
             if use_engine == "nllb":
                 raise
             translated = []
 
+    # Fallback to LibreTranslate
     if not translated and use_engine in ("libre", "auto"):
         try:
             translated = _lt_translate_batched(
-                payload, source, target, libre_endpoint, libre_api_key,
+                groups, source, target, libre_endpoint, libre_api_key,
                 batch_size=batch_size, progress_cb=progress_cb
             )
         except Exception:
@@ -308,12 +395,37 @@ def translate_srt_with_progress(
                 raise
             translated = []
 
+    # Last resort
     if not translated:
-        translated = _argos_translate(payload, source, target, progress_cb=progress_cb)
+        translated = _argos_translate(groups, source, target, progress_cb=progress_cb)
 
-    # Reinsert translated lines back into blocks
-    it = iter(translated)
-    for (bi, li) in text_positions:
-        blocks[bi][li] = next(it, "")
+    # Place translated strings back into the original blocks
+    gi = 0
+    for (bi, idxs) in placements:
+        text = _nfc(translated[gi] if gi < len(translated) else "")
+        gi += 1
 
+        # Single line: straight replace
+        if len(idxs) == 1:
+            blocks[bi][idxs[0]] = text.strip()
+            continue
+
+        # Multi-line run: try to split by sentinel first
+        parts = [p.strip() for p in text.split(_SENTINEL)]
+        if len(parts) != len(idxs):
+            # If the model returned embedded newlines that match line count, accept them
+            nl_parts = [p.strip() for p in re.split(r"\r?\n", text) if p.strip()]
+            if len(nl_parts) == len(idxs):
+                parts = nl_parts
+            else:
+                # Use reflow that avoids splitting words; guide by original line lengths
+                orig_lens = [len(blocks[bi][k]) for k in idxs]
+                parts = _split_to_n_lines_preserving_words(text, len(idxs), target_lengths=orig_lens)
+
+        # Assign back
+        for li, part in zip(idxs, parts):
+            blocks[bi][li] = part
+
+    # Final cleanup: ensure every block still has index + timestamp intact
+    # (do not create or renumber indices; we never touched those lines)
     return _join_srt(blocks)

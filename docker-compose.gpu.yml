@@ -1,19 +1,54 @@
-# GPU override for NLLB service.
-# Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
-# Notes:
-# - Requires NVIDIA drivers + NVIDIA Container Toolkit (Linux) or Docker Desktop GPU (WSL2) on Windows.
-# - Compose will pass GPU devices into the nllb container via `gpus: all`.
-
 services:
   nllb:
-    # Reuse the existing image/build/volumes/ports from docker-compose.yml
-    # Add GPU access + a few safe CUDA/PyTorch env tweaks.
-    gpus: all
+    build:
+      context: ./nllb
+      dockerfile: Dockerfile
+    container_name: srtxlate_nllb
+    env_file:
+      - .env
     environment:
-      # Make all GPUs visible inside the container (toolkit honors this).
-      - NVIDIA_VISIBLE_DEVICES=all
-      # Optional PyTorch allocator hint to reduce fragmentation on large models.
-      - TORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
-    # Give a bit more shared memory for larger batches/tokenizers (optional).
-    shm_size: "2g"
+      - NLLB_DEVICE=cuda
+      - HF_HOME=/models_cache
+      - HF_HUB_DISABLE_TELEMETRY=1
+      - HF_HUB_ENABLE_XET=0
+      - TORCH_CUDA_ALLOC_CONF=max_split_size_mb:64
+      # Prefer local model folder (from .env), fallback path 'current' if not set
+      - NLLB_MODEL_DIR=/models/${NLLB_MODEL_LOCAL:-current}
+      # Also pass through hub id fallback from .env
+      - NLLB_MODEL=${NLLB_MODEL}
+    volumes:
+      - ./models_cache:/models_cache
+      - ./models:/models:ro
+    ports:
+      - "127.0.0.1:6100:6100"
+    shm_size: "2gb"
+    gpus: all
+    restart: unless-stopped
+
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: srtxlate_app
+    env_file:
+      - .env
+    environment:
+      - NLLB_ENDPOINT=http://nllb:6100
+    depends_on:
+      - nllb
+      - libretranslate
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    container_name: srtxlate_libre
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - libretranslate_models:/home/libretranslate/.local
+    restart: unless-stopped
+
+volumes:
+  libretranslate_models:
